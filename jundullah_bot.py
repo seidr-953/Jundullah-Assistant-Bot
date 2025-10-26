@@ -1,25 +1,43 @@
+from dotenv import load_dotenv
+import os
+
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
+    Update,
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup
 )
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    ConversationHandler, MessageHandler, ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler, 
+    CallbackQueryHandler,
+    ConversationHandler, 
+    MessageHandler, 
+    ContextTypes, filters
 )
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+# import environment variable from .env
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
+GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
+
 # ---------------- Google Sheets Setup ----------------
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_PATH, scope)
 client = gspread.authorize(creds)
 # sheet = client.open("Jundullah Members").sheet1
 
+
+# ========================= Connect to Google Sheet =========================
 try:
-    sheet = client.open("Jundullah Memebers").sheet1
-    print("✅ Sheet found!")
-    print(sheet.get_all_records())
+    sheet = client.open(GOOGLE_SHEET_NAME).sheet1
+    print("✅ Connected to Google Sheet successfully!")
+    # print(sheet.get_all_records())
 except Exception as e:
-    print("❌ Error:", e)
+    print("❌ Error connecting to Google Sheet:", e)
 
 # ---------------- Conversation States ----------------
 (
@@ -181,9 +199,12 @@ async def reg_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Save data to Google Sheet
     data = [
-        context.user_data["name"], context.user_data["phone"],
-        context.user_data["email"], context.user_data["address"],
-        context.user_data["profession"], context.user_data["purpose"]
+        context.user_data["name"], 
+        context.user_data["phone"],
+        context.user_data["email"], 
+        context.user_data["address"],
+        context.user_data["profession"], 
+        context.user_data["purpose"]
     ]
     sheet.append_row(data)
 
@@ -201,7 +222,7 @@ async def reg_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------- Main Function ----------------
 def main():
     # app = ApplicationBuilder().token("YOUR_BOT_TOKEN_HERE").build()
-    app = ApplicationBuilder().token("8293037291:AAFXEXzOPVPzJRoAbkkNBosB5BC2haQVYB4").build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
