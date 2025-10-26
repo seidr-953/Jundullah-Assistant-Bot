@@ -1,0 +1,32 @@
+# =========================================
+# Git Ignore for Jundullah Assistant Bot
+# =========================================
+
+# 🔐 Sensitive files
+.env
+credentials.json
+
+# 🐍 Python cache & environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment folders
+env/
+venv/
+bot.env/
+.venv/
+
+# 📦 IDE & editor settings
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
