@@ -1,10 +1,12 @@
 from dotenv import load_dotenv
 import os
+import logging
+from threading import Thread
 
 from telegram import (
     Update,
     InlineKeyboardButton, 
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,6 +18,14 @@ from telegram.ext import (
 )
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+# from languages import translations
+
+# Optional keep-alive webserver (for Replit)
+try:
+    from flask import Flask  # type: ignore
+    FLASK_AVAILABLE = True
+except Exception:
+    FLASK_AVAILABLE = False
 
 # import environment variable from .env
 load_dotenv()
@@ -23,6 +33,13 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
+
+
+# ---------------------------
+# Logging
+# ---------------------------
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ---------------- Google Sheets Setup ----------------
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -39,12 +56,39 @@ try:
 except Exception as e:
     print("❌ Error connecting to Google Sheet:", e)
 
+
+# ---------------------------
+# Keep-alive server 
+# If Flask is available we start a simple server on port 8080 (Replit friendly).
+# ---------------------------
+if FLASK_AVAILABLE:
+    flask_app = Flask("keepalive")
+
+    @flask_app.route("/")
+    def home():
+        return "🤖 Jundullah Assistant Bot is alive"
+
+    def run_flask():
+        flask_app.run(host="0.0.0.0", port=8080)
+
+    # start flask in a thread so it doesn't block the bot
+    Thread(target=run_flask, daemon=True).start()
+else:
+    logger.info("Flask not available; keep-alive webserver disabled. Install flask to enable it.")
+
+
 # ---------------- Conversation States ----------------
 (
     MAIN_MENU, INFO_MENU, REGISTER_ELIGIBLE,
     REG_NAME, REG_PHONE, REG_EMAIL, REG_ADDRESS,
     REG_PROF, REG_PURPOSE, REG_ACCEPT
 ) = range(10)
+
+
+async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    return await start(update, context)
 
 
 # ---------------- Start / Main Menu ----------------
@@ -54,14 +98,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🧾 Register as a Member", callback_data="register")],
         [InlineKeyboardButton("📞 Contact Us", callback_data="contact")]
     ]
-    await update.message.reply_text(
+
+    text = (
         "As-salamu alaykum and welcome to the *Jundullah Charitable Association.*\n\n"
         "I am here to help you learn about our association and guide you through the membership registration process.\n\n"
-        "Please choose an option below:",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "Please choose an option below:"
     )
+
+    # Support both message and callback
+    if update.message:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
     return MAIN_MENU
+
 
 
 # ---------------- Handle Main Menu ----------------
@@ -75,8 +126,10 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏗️ Our Activities", callback_data="act")],
             [InlineKeyboardButton("🏛️ Our Structure", callback_data="struct")],
             [InlineKeyboardButton("⚖️ Member Rights & Duties", callback_data="rights")],
-            [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="back_main")]
+            # this Back goes to back_main (not 'learn')
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
         ]
+
         await query.edit_message_text(
             "What would you like to know?",
             reply_markup=InlineKeyboardMarkup(submenu)
@@ -86,8 +139,10 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "register":
         keyboard = [
             [InlineKeyboardButton("✅ Yes, proceed", callback_data="yes_reg")],
-            [InlineKeyboardButton("❌ No, go back", callback_data="no_reg")]
+            # back_main here so pressing it returns to main
+            [InlineKeyboardButton("❌ No, go back", callback_data="back_main")]
         ]
+
         await query.edit_message_text(
             "Thank you for your interest in joining *Jundullah Charitable Association.*\n\n"
             "To be eligible, you must be an Ethiopian national who accepts the objectives and bylaws of the Association.\n\n"
@@ -98,11 +153,20 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return REGISTER_ELIGIBLE
 
     elif query.data == "contact":
+        back_btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="back_main")]
+        ])
         await query.edit_message_text(
-            "📞 *Contact Us*\n\nEmail: info@jundullah.org\nPhone: +251-XXX-XXX-XXX\nAddress: Addis Ababa, Ethiopia",
-            parse_mode="Markdown"
+            "📞 *Contact Us*\n\n"
+            "Email: Junudullahcharity@gmail.com\n"
+            "Phone: +251-937-067-800\n"
+            "Address: Addis Ababa, Ethiopia",
+            parse_mode="Markdown",
+            reply_markup=back_btn
         )
-        return ConversationHandler.END
+        return MAIN_MENU
+
+
 
 
 # ---------------- Info Menu ----------------
@@ -113,22 +177,36 @@ async def info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = {
         "obj": "📘 *Our Objectives:*\n• Provide humanitarian assistance.\n• Support education, health, and livelihood.\n• Promote self-reliance.\n• Undertake lawful charitable works.",
         "act": "🏗️ *Our Activities:*\n• Mobilize donations & grants.\n• Implement development projects.\n• Collaborate with partners.\n• Conduct awareness programs.",
-        "struct": "🏛️ *Our Structure:*\n• Founding Members: 33\n• General Assembly: Supreme body\n• Board: 7 elected members\n• Executive Committee: Daily management\n• Audit Committee: Oversight",
+        "struct": "🏛️ *Our Structure:*\n• Founding Members: 33\n• General Assembly → Supreme body\n• Board → 7 elected members\n• Executive Committee → Daily management\n• Audit Committee → Oversight",
         "rights": "⚖️ *Rights & Duties:*\n\n*Rights:*\n• Attend & vote\n• Elect or be elected\n• Access information\n\n*Duties:*\n• Follow bylaws\n• Pay fees\n• Protect our name"
     }
 
+    # If user selected an info item, show the page and a Back-to-Learn button
     if query.data in info:
-        await query.edit_message_text(
-            info[query.data],
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Back", callback_data="learn")]]
-            )
-        )
-    elif query.data == "back_main":
-        await query.edit_message_text("Returning to main menu...")
-        await start(update, context)
+        back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_learn")]])
+        await query.edit_message_text(info[query.data], parse_mode="Markdown", reply_markup=back_btn)
+        return INFO_MENU
+
+    # If user clicked the Back-to-main button from the learn submenu
+    if query.data == "back_main":
+        return await back_to_main(update, context)
+
+    # If user clicked the back_learn button to return to the learn submenu
+    if query.data == "back_learn":
+        # build the learn submenu again
+        submenu = [
+            [InlineKeyboardButton("🎯 Our Objectives", callback_data="obj")],
+            [InlineKeyboardButton("🏗️ Our Activities", callback_data="act")],
+            [InlineKeyboardButton("🏛️ Our Structure", callback_data="struct")],
+            [InlineKeyboardButton("⚖️ Member Rights & Duties", callback_data="rights")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
+        ]
+        await query.edit_message_text("What would you like to know?", reply_markup=InlineKeyboardMarkup(submenu))
+        return INFO_MENU
+
     return INFO_MENU
+
+
 
 
 # ---------------- Registration Flow ----------------
@@ -216,6 +294,11 @@ async def reg_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "May Allah accept your good intentions."
     )
     await query.edit_message_text(summary, parse_mode="Markdown")
+
+    # Show main menu again — single Back button
+    back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_main")]])
+    await query.message.reply_text("🏠 Back to main menu:", reply_markup=back_markup)
+
     return ConversationHandler.END
 
 
@@ -225,23 +308,49 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            MAIN_MENU: [CallbackQueryHandler(main_menu)],
-            INFO_MENU: [CallbackQueryHandler(info_menu)],
-            REGISTER_ELIGIBLE: [CallbackQueryHandler(register_eligibility)],
-            REG_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_name)],
-            REG_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_phone)],
-            REG_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_email)],
-            REG_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_address)],
-            REG_PROF: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_prof)],
-            REG_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_purpose)],
-            REG_ACCEPT: [CallbackQueryHandler(reg_accept)],
-        },
-        fallbacks=[CommandHandler("start", start)],
-    )
+    entry_points=[CommandHandler("start", start)],
+
+    states={
+        MAIN_MENU: [
+            CallbackQueryHandler(back_to_main, pattern="^back_main$"),
+            CallbackQueryHandler(main_menu)
+        ],
+
+        INFO_MENU: [
+            CallbackQueryHandler(back_to_main, pattern="^back_main$"),
+            CallbackQueryHandler(info_menu)
+        ],
+
+        REGISTER_ELIGIBLE: [
+            CallbackQueryHandler(back_to_main, pattern="^back_main$"),
+            CallbackQueryHandler(register_eligibility)
+        ],
+
+        REG_NAME:  [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_name)],
+        REG_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_phone)],
+        REG_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_email)],
+        REG_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_address)],
+        REG_PROF: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_prof)],
+        REG_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_purpose)],
+
+        REG_ACCEPT: [
+            CallbackQueryHandler(back_to_main, pattern="^back_main$"),
+            CallbackQueryHandler(reg_accept)
+        ],
+    },
+
+    fallbacks=[CommandHandler("start", start)],
+)
+
 
     app.add_handler(conv_handler)
+    # app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_main$"))
+    app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_main$"))
+    # app.add_handler()
+    # app.add_handler(CommandHandler("language", language))
+    # app.add_handler(CallbackQueryHandler(language_button, pattern=r"^lang_"))
+
     print("🤖 Jundullah Assistant is running...")
     app.run_polling()
 
