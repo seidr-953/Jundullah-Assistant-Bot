@@ -20,6 +20,12 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 # from languages import translations
 
+# ---------------------------
+# Logging
+# ---------------------------
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Optional keep-alive webserver (for Replit)
 try:
     from flask import Flask  # type: ignore
@@ -31,30 +37,51 @@ except Exception:
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
-
-
-# ---------------------------
-# Logging
-# ---------------------------
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
+import json
+import tempfile
 
 # ---------------- Google Sheets Setup ----------------
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_PATH, scope)
+GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
+GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
+
+if not GOOGLE_CREDENTIALS_JSON:
+    raise ValueError("❌ Missing GOOGLE_CREDENTIALS_JSON environment variable")
+
+# Create a temporary file to hold the credentials content
+with tempfile.NamedTemporaryFile(mode="w+", delete=False) as temp_json:
+    temp_json.write(GOOGLE_CREDENTIALS_JSON)
+    temp_json.flush()
+    creds = ServiceAccountCredentials.from_json_keyfile_name(temp_json.name, [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ])
+
 client = gspread.authorize(creds)
-# sheet = client.open("Jundullah Members").sheet1
 
-
-# ========================= Connect to Google Sheet =========================
+# Try connecting to your Google Sheet
 try:
     sheet = client.open(GOOGLE_SHEET_NAME).sheet1
     print("✅ Connected to Google Sheet successfully!")
-    # print(sheet.get_all_records())
 except Exception as e:
     print("❌ Error connecting to Google Sheet:", e)
+
+# GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
+# GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
+
+# # ---------------- Google Sheets Setup ----------------
+# scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_PATH, scope)
+# client = gspread.authorize(creds)
+# # sheet = client.open("Jundullah Members").sheet1
+
+
+# # ========================= Connect to Google Sheet =========================
+# try:
+#     sheet = client.open(GOOGLE_SHEET_NAME).sheet1
+#     print("✅ Connected to Google Sheet successfully!")
+#     # print(sheet.get_all_records())
+# except Exception as e:
+#     print("❌ Error connecting to Google Sheet:", e)
 
 
 # ---------------------------
